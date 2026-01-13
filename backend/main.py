@@ -113,6 +113,7 @@ async def start_agent(call_id: str):
         ✅ User: "Hey Assistant, summarize the meeting" → You: Provide summary
         """,
         llm=gemini.Realtime(fps=0),
+        audio_queue_limit=30000,
     )
     
     meeting_data["agent"] = agent
@@ -212,22 +213,28 @@ async def start_agent(call_id: str):
     # Initialize agent
     await agent.create_user()
     call = agent.edge.client.video.call("default", call_id)
+
     
-    logger.info("✅ Joining call...")
-    async with agent.join(call):
-        logger.info("\n" + "="*60)
-        logger.info("🎙️  MEETING ASSISTANT ACTIVE!")
-        logger.info("="*60)
-        logger.info("\n📋 Features:")
-        logger.info("   1. ✅ Auto-transcription")
-        logger.info("   2. ✅ Q&A (say 'Hey Assistant' + question)")
-        logger.info(f"\n🔗 Meeting ID: {call_id}")
-        logger.info("\nPress Ctrl+C to stop\n")
-        logger.info("="*60 + "\n")
+    logger.info(f"🔄 Starting monitoring loop for: {call_id}")
+    
+    while True:
+        try:
+            logger.info("✅ Attempting to join call...")
+            async with agent.join(call):
+                logger.info("\n" + "="*60)
+                logger.info("🎙️  MEETING ASSISTANT ACTIVE!")
+                logger.info("="*60)
+                logger.info(f"\n🔗 Meeting ID: {call_id}\n")
+                
+                # CRITICAL: This line stops the code here and keeps the bot 
+                # in the room until the connection breaks.
+                await agent.wait_until_done() 
         
-        await agent.finish()
-    
-    logger.info("✅ Agent finished")
+        except Exception as e:
+            # If Render's CPU spikes and kills the connection, we catch it here
+            logger.error(f"⚠️ Connection dropped: {e}")
+            logger.info("🔄 Waiting 10 seconds before rejoining...")
+            await asyncio.sleep(5)  
 
 def print_meeting_summary():
     """Print meeting summary"""
@@ -245,7 +252,7 @@ def print_meeting_summary():
     print("="*70 + "\n")
 
 if __name__ == "__main__":
-    call_id = os.getenv("CALL_ID", f"meeting-{uuid4().hex[:8]}")
+    call_id = os.getenv("CALL_ID", f"meeting-{uuid4().hex[:8]}")    
     
     print("\n" + "="*70)
     print("🎯 SMART MEETING ASSISTANT")
