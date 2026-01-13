@@ -38,7 +38,11 @@ def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-Thread(target=run_health_server, daemon=True).start()
+def keep_alive():
+    """Starts the Flask server in a background thread."""
+    t = Thread(target=run_health_server, daemon=True)
+    t.start()    
+
 
 
 # Setup logging
