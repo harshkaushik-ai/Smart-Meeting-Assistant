@@ -196,7 +196,7 @@ async def start_agent(call_id: str):
     call = agent.edge.client.video.call("default", call_id)
     
     logger.info("✅ Joining call...")
-    with await agent.join(call):
+    async with agent.join(call):
         logger.info("\n" + "="*60)
         logger.info("🎙️  MEETING ASSISTANT ACTIVE!")
         logger.info("="*60)
@@ -236,6 +236,8 @@ if __name__ == "__main__":
     print("   1. Auto-transcription")
     print("   2. Q&A with 'Hey Assistant'")
     print("="*70 + "\n")
+
+    keep_alive()
     
     try:
         asyncio.run(start_agent(call_id))
