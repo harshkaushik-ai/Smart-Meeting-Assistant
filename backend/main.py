@@ -113,7 +113,6 @@ async def start_agent(call_id: str):
         ✅ User: "Hey Assistant, summarize the meeting" → You: Provide summary
         """,
         llm=gemini.Realtime(fps=0),
-        audio_queue_limit=30000,
     )
     
     meeting_data["agent"] = agent
