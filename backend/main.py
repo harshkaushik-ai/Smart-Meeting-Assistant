@@ -30,6 +30,20 @@ from vision_agents.core.llm.events import (
 
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return """
+    <html>
+        <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h1>🎙️ Meeting Assistant is Live</h1>
+            <p>Status: <b>Active</b></p>
+            <p>Monitoring Call ID: <code>demo-meeting-room</code></p>
+            <hr>
+            <p><small>Check the Render logs for the live transcript.</small></p>
+        </body>
+    </html>
+    """, 200
+
 @app.route('/health')
 def health():
     return "OK", 200
