@@ -304,9 +304,8 @@ from vision_agents.core.llm.events import (
 
 # 1. SETUP FLASK WITH CORS
 app = Flask(__name__)
-CORS(app)  # This allows your Vercel frontend to talk to this Render backend
+CORS(app)
 
-# Meeting data storage
 meeting_data = {
     "transcript": [],
     "is_active": False,
@@ -317,17 +316,7 @@ meeting_data = {
 def home():
     cid = meeting_data.get("call_id", "Not Assigned")
     status = "ACTIVE 🟢" if meeting_data.get("is_active") else "WAITING ⚪"
-    return f"""
-    <html>
-        <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1>🎙️ Meeting Assistant Status</h1>
-            <p>Current Status: <b>{status}</b></p>
-            <p>Monitoring Call ID: <code>{cid}</code></p>
-            <hr>
-            <p><small>If Vercel shows 404, make sure it is looking for this exact Call ID.</small></p>
-        </body>
-    </html>
-    """, 200
+    return f"<h1>Meeting Assistant: {status}</h1><p>Room: {cid}</p>", 200
 
 @app.route('/health')
 def health():
@@ -344,80 +333,50 @@ load_dotenv()
 
 async def start_agent(call_id: str):
     meeting_data["call_id"] = call_id
-    logger.info(f"🚀 Starting monitoring loop for room: {call_id}")
     
     while True:
         try:
-            # FIX: Use a unique ID every time we retry to bypass "Agent already joined"
             unique_sid = f"assistant-{uuid4().hex[:4]}"
-            logger.info(f"🔄 Initializing fresh agent instance: {unique_sid}")
+            logger.info(f"🔄 Creating agent: {unique_sid}")
 
             agent = agents.Agent(
                 edge=getstream.Edge(),
-                agent_user=User(
-                    id=unique_sid,
-                    name="Meeting Assistant"
-                ),
-                instructions="""
-                You are a meeting transcription bot. 
-                1. Transcribe everything silently. 
-                2. ONLY speak if you hear 'Hey Assistant'.
-                3. Keep answers factual and based on the meeting.
-                """,
+                agent_user=User(id=unique_sid, name="Meeting Assistant"),
+                instructions="Transcribe everything silently. Only reply to 'Hey Assistant'.",
                 llm=gemini.Realtime(fps=0),
             )
 
-            # ALL EVENT SUBSCRIPTIONS MUST BE INSIDE THE LOOP
             @agent.events.subscribe
             async def handle_session_started(event: CallSessionStartedEvent):
                 meeting_data["is_active"] = True
-                logger.info("🎙️ Connection Established")
+                logger.info("🎙️ Bot joined and listening...")
 
             @agent.events.subscribe
             async def handle_transcript(event: RealtimeUserSpeechTranscriptionEvent):
-                if not event.text: return
-                text = event.text.strip()
-                speaker = getattr(event, 'participant_id', 'User')
-                meeting_data["transcript"].append({"speaker": speaker, "text": text})
-                logger.info(f"📝 [{speaker}]: {text}")
-                
-                if "hey assistant" in text.lower():
-                    logger.info("❓ User requested assistance")
-                    await agent.simple_response("I am currently recording the transcript. How can I help?")
+                if event.text:
+                    text = event.text.strip()
+                    meeting_data["transcript"].append({"text": text})
+                    logger.info(f"📝: {text}")
+                    if "hey assistant" in text.lower():
+                        await agent.simple_response("I am recording. How can I help?")
 
-            @agent.events.subscribe
-            async def handle_llm_response(event: LLMResponseChunkEvent):
-                if hasattr(event, 'delta') and event.delta:
-                    logger.info(f"🤖 Bot: {event.delta}")
-
-            @agent.events.subscribe
-            async def handle_errors(event: PluginErrorEvent):
-                logger.error(f"❌ Plugin error: {event.error_message}")
-
-            # ACTIVATE
             await agent.create_user()
             call = agent.edge.client.video.call("default", call_id)
 
-            logger.info(f"✅ Attempting join...")
-            async with agent.join(call):
-                await agent.wait_until_done() 
+            # CHANGE 1: Added participant_wait_timeout=300 (5 minutes)
+            # This gives you time to open the website without the bot leaving immediately.
+            logger.info(f"✅ Attempting to join {call_id}...")
+            async with agent.join(call, participant_wait_timeout=300.0):
+                # CHANGE 2: Used .finish() instead of .wait_until_done()
+                # This fixes the AttributeError from your logs.
+                await agent.finish() 
         
         except Exception as e:
             meeting_data["is_active"] = False
-            logger.error(f"⚠️ Connection dropped: {e}")
-            # Wait 10 seconds before generating a brand NEW agent identity and retrying
-            logger.info("🔄 Retrying with a fresh session in 10s...")
+            logger.error(f"⚠️ Connection error: {e}")
             await asyncio.sleep(10)
 
 if __name__ == "__main__":
-    # Use a stable CALL_ID from Render Env Vars, or a fixed default for testing
     target_room = os.getenv("CALL_ID", "demo-meeting-room")
-    
-    # Start Flask
-    t = Thread(target=run_health_server, daemon=True)
-    t.start()
-    
-    try:
-        asyncio.run(start_agent(target_room))
-    except KeyboardInterrupt:
-        logger.info("🛑 Bot stopped by user")
+    Thread(target=run_health_server, daemon=True).start()
+    asyncio.run(start_agent(target_room))
