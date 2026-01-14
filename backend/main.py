@@ -274,109 +274,91 @@
 #             print_meeting_summary()
 
 
-
 import asyncio
 import os
 import logging
+import sys
 from flask import Flask
 from threading import Thread
 from uuid import uuid4
 from dotenv import load_dotenv
 from flask_cors import CORS
 
-# Vision Agents imports
 from vision_agents.core import agents
 from vision_agents.plugins import getstream, gemini
 from vision_agents.core.edge.types import User
+from vision_agents.core.events import CallSessionStartedEvent
+from vision_agents.core.llm.events import RealtimeUserSpeechTranscriptionEvent
 
-# Core events
-from vision_agents.core.events import (
-    CallSessionStartedEvent,
-    CallSessionEndedEvent,
-    PluginErrorEvent
-)
-
-# LLM events
-from vision_agents.core.llm.events import (
-    RealtimeUserSpeechTranscriptionEvent, 
-    LLMResponseChunkEvent
-)
-
-# 1. SETUP FLASK WITH CORS
+# 1. FLASK SETUP
 app = Flask(__name__)
 CORS(app)
 
-meeting_data = {
-    "transcript": [],
-    "is_active": False,
-    "call_id": None
-}
-
-@app.route('/')
-def home():
-    cid = meeting_data.get("call_id", "Not Assigned")
-    status = "ACTIVE 🟢" if meeting_data.get("is_active") else "WAITING ⚪"
-    return f"<h1>Meeting Assistant: {status}</h1><p>Room: {cid}</p>", 200
+meeting_data = {"is_active": False, "call_id": None}
 
 @app.route('/health')
-def health():
-    return "OK", 200
+def health(): return "OK", 200
 
-def run_health_server():
+@app.route('/')
+def home(): return f"Status: {meeting_data['is_active']}", 200
+
+def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # 2. BOT LOGIC
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-async def start_agent(call_id: str):
+async def start_agent():
+    call_id = os.getenv("CALL_ID", "demo-meeting-room")
     meeting_data["call_id"] = call_id
     
     while True:
         try:
+            # Re-initialize Edge inside the loop for fresh credentials
+            edge = getstream.Edge()
             unique_sid = f"assistant-{uuid4().hex[:4]}"
-            logger.info(f"🔄 Creating agent: {unique_sid}")
-
+            
             agent = agents.Agent(
-                edge=getstream.Edge(),
+                edge=edge,
                 agent_user=User(id=unique_sid, name="Meeting Assistant"),
-                instructions="Transcribe everything silently. Only reply to 'Hey Assistant'.",
+                instructions="Listen and transcribe. Only speak if you hear 'Hey Assistant'.",
                 llm=gemini.Realtime(fps=0),
             )
 
             @agent.events.subscribe
-            async def handle_session_started(event: CallSessionStartedEvent):
+            async def on_start(event: CallSessionStartedEvent):
                 meeting_data["is_active"] = True
-                logger.info("🎙️ Bot joined and listening...")
+                logger.info("🎙️ Connected to Stream!")
 
             @agent.events.subscribe
-            async def handle_transcript(event: RealtimeUserSpeechTranscriptionEvent):
+            async def on_transcript(event: RealtimeUserSpeechTranscriptionEvent):
                 if event.text:
-                    text = event.text.strip()
-                    meeting_data["transcript"].append({"text": text})
-                    logger.info(f"📝: {text}")
-                    if "hey assistant" in text.lower():
-                        await agent.simple_response("I am recording. How can I help?")
+                    logger.info(f"📝 {unique_sid} heard: {event.text}")
 
             await agent.create_user()
-            call = agent.edge.client.video.call("default", call_id)
+            call = edge.client.video.call("default", call_id)
 
-            # CHANGE 1: Added participant_wait_timeout=300 (5 minutes)
-            # This gives you time to open the website without the bot leaving immediately.
-            logger.info(f"✅ Attempting to join {call_id}...")
-            async with agent.join(call, participant_wait_timeout=300.0):
-                # CHANGE 2: Used .finish() instead of .wait_until_done()
-                # This fixes the AttributeError from your logs.
-                await agent.finish() 
+            logger.info(f"🚀 Joining room: {call_id} as {unique_sid}")
+            
+            # Using 10 minute timeout to be safe
+            async with agent.join(call, participant_wait_timeout=600.0):
+                await agent.finish()
         
         except Exception as e:
             meeting_data["is_active"] = False
-            logger.error(f"⚠️ Connection error: {e}")
-            await asyncio.sleep(10)
+            logger.error(f"❌ Critical Error: {e}")
+            await asyncio.sleep(10) # Cooldown before restart
 
 if __name__ == "__main__":
-    target_room = os.getenv("CALL_ID", "demo-meeting-room")
-    Thread(target=run_health_server, daemon=True).start()
-    asyncio.run(start_agent(target_room))
+    # Start Flask in background thread
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Start the async bot loop
+    try:
+        asyncio.run(start_agent())
+    except KeyboardInterrupt:
+        logger.info("Clean shutdown")
