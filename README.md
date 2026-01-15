@@ -1,9 +1,9 @@
-🎙️ Smart Meeting Assistant
+# 🎙️ Smart Meeting Assistant
 AI-Powered Video Conferencing Platform
 
 Smart Meeting Assistant is a full-stack video conferencing application integrated with a real-time AI assistant. The assistant joins meetings, listens to conversations, generates live transcriptions, and answers questions using Google Gemini AI.
 
-🚀 Features
+## 🚀 Features
 
 📺 Real-time video & audio conferencing using Stream SDK
 
@@ -17,7 +17,7 @@ Smart Meeting Assistant is a full-stack video conferencing application integrate
 
 🔐 Secure authentication and meeting tokens
 
-🛠 Tech Stack
+## 🛠 Tech Stack
 
 Frontend: Next.js, Tailwind CSS
 
@@ -27,7 +27,7 @@ AI: Google Gemini API
 
 Infrastructure: Stream Video & Chat SDK
 
-▶️ Getting Started
+## ▶️ Getting Started
 
 Clone the repository
 
@@ -37,6 +37,6 @@ Configure environment variables
 
 Run frontend and AI assistant
 
-📄 License
+## 📄 License
 
 This project is built for educational and portfolio purposes.
